@@ -3,7 +3,7 @@ main.py
 
 mini crm для управления операторами, источниками, контактами и лидами.
 """
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from typing import List
 from .database import Base, engine, SessionLocal
 from .schemas import OperatorCreate, SourceCreate, WeightCreate, ContactCreate
@@ -34,6 +34,21 @@ def list_operators():
     db = SessionLocal()
     return db.query(Operator).all()
 
+@app.patch("/operators/{operator_id}", summary="Обновить оператора")
+def update_operator(operator_id: int, data: OperatorCreate):
+    """
+    Обновляет активность и лимит нагрузки оператора.
+    """
+    db = SessionLocal()
+    operator = db.query(Operator).filter_by(id=operator_id).first()
+    if not operator:
+        raise HTTPException(status_code=404, detail="Operator not found")
+    operator.name = data.name
+    operator.active = data.active
+    operator.load_limit = data.load_limit
+    db.commit()
+    db.refresh(operator)
+    return operator
 
 # ==========================
 # Источники
@@ -58,6 +73,27 @@ def assign_weights(source_id: int, weights: List[WeightCreate]):
     db.commit()
     return {"status": "ok"}
 
+@app.patch("/sources/{source_id}/weights/{operator_id}", summary="Обновить вес оператора для источника")
+def update_weight(source_id: int, operator_id: int, weight: int):
+    db = SessionLocal()
+    assignment = db.query(SourceOperatorWeight).filter_by(source_id=source_id, operator_id=operator_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Weight assignment not found")
+    assignment.weight = weight
+    db.commit()
+    db.refresh(assignment)
+    return assignment
+
+
+@app.delete("/sources/{source_id}/weights/{operator_id}", summary="Удалить вес оператора для источника")
+def delete_weight(source_id: int, operator_id: int):
+    db = SessionLocal()
+    assignment = db.query(SourceOperatorWeight).filter_by(source_id=source_id, operator_id=operator_id).first()
+    if not assignment:
+        raise HTTPException(status_code=404, detail="Weight assignment not found")
+    db.delete(assignment)
+    db.commit()
+    return {"status": "deleted"}
 
 # ==========================
 # Контакты и лиды
@@ -109,3 +145,25 @@ def list_leads():
 def list_contacts():
     db = SessionLocal()
     return db.query(Contact).all()
+
+
+# ==========================
+# Отчёты
+# ==========================
+
+@app.get("/reports", summary="Отчёт по распределению контактов")
+def contacts_report():
+    """
+    Возвращает количество контактов по операторам и источникам.
+    """
+    db = SessionLocal()
+    report = []
+    contacts = db.query(Contact).all()
+    for contact in contacts:
+        report.append({
+            "contact_id": contact.id,
+            "lead_id": contact.lead_id,
+            "source": contact.source.name if contact.source else None,
+            "operator": contact.operator.name if contact.operator else None
+        })
+    return report
